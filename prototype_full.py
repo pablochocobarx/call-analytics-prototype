@@ -229,16 +229,23 @@ elif persona.startswith("💼"):
     r3.metric("Profit (₹)", f"₹{rev-cost:,}")
     r4.metric("SQL / QL %", f"{pct(sql,ql)}%")
 
-    st.markdown('<p class="section-title">Avg Dials to Reach Stage</p>', unsafe_allow_html=True)
-    stages = pd.DataFrame({"Stage":["First Connect","First Interact","Completed","Qualified"],
-        "Avg Dials":[round(df["Dialled"].sum()/max(df["Connected"].sum(),1),2),
-                     round(df["Dialled"].sum()/max(df["Interacted"].sum(),1),2),
-                     round(df["Dialled"].sum()/max(df["Completed"].sum(),1),2),
-                     round(df["Dialled"].sum()/max(df["Qualified"].sum(),1),2)]})
+    st.markdown('<p class="section-title">Avg Dials to Reach Stage — by Channel</p>', unsafe_allow_html=True)
+    st.caption("Inbound bots reach qualified in few dials. Outbound bots cold-call so dial count to qualified is naturally higher (typical: 100+).")
+    rows = []
+    for ch in ["Inbound","Outbound"]:
+        sub = df[df["Channel"]==ch]
+        if sub.empty: continue
+        d = sub["Dialled"].sum()
+        for stage, num in [("First Connect","Connected"),("First Interact","Interacted"),("Completed","Completed"),("Qualified","Qualified")]:
+            den = sub[num].sum()
+            rows.append({"Stage": stage, "Channel": ch, "Avg Dials": round(d/max(den,1),2)})
+    stages = pd.DataFrame(rows)
     st.altair_chart(alt.Chart(stages).mark_bar().encode(
-        x=alt.X("Stage:N",sort=None), y="Avg Dials:Q",
-        color=alt.Color("Stage:N",legend=None,scale=alt.Scale(scheme="oranges")),
-        tooltip=["Stage","Avg Dials"]).properties(height=240), use_container_width=True)
+        x=alt.X("Stage:N", sort=["First Connect","First Interact","Completed","Qualified"], title=None),
+        y=alt.Y("Avg Dials:Q", title="Avg Dials Needed"),
+        color=alt.Color("Channel:N", scale=alt.Scale(domain=["Inbound","Outbound"], range=["#4263eb","#f76707"])),
+        column=alt.Column("Channel:N", title=None),
+        tooltip=["Channel","Stage","Avg Dials"]).properties(height=240, width=300), use_container_width=False)
 
     st.markdown('<p class="section-title">Talk Time</p>', unsafe_allow_html=True)
     t1,t2 = st.columns(2)
