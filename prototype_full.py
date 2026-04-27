@@ -17,7 +17,7 @@ st.markdown("""
         background-color: #f7f9fc; border: 1px solid #e0e4ea;
         border-radius: 10px; padding: 14px 18px;
     }
-    .section-title { font-size: 1.05rem; font-weight: 600; color: #333; margin-bottom: 0.5rem; }
+    .section-title { font-size: 1.1rem; font-weight: 700; margin: 14px 0 6px; }
     .proto-banner {
         background: #fff3cd; border: 1px solid #ffc107; padding: 8px 14px;
         border-radius: 6px; font-size: 0.85rem; color: #856404; margin-bottom: 12px;
