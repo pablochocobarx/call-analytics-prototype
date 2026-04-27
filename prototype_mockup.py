@@ -300,14 +300,18 @@ else:
     }).reset_index().sort_values("Revenue (₹)",ascending=False)
     paged_table(summary, key="owner_summary")
 
+    HEALTH_EMOJI = {"Bad":"🔴","Weak":"🟠","OK":"🟡","Good":"🟢","Very Good":"🟢","Excellent":"💚"}
+
     st.markdown('<p class="section-title">Bot Health — Inbound</p>', unsafe_allow_html=True)
-    st.caption("Zone thresholds: 0–5 Bad · 5–10 Weak · 10–15 OK · 15–20 Good · 20+ Excellent")
+    st.caption("Zone thresholds: 0–5 🔴 Bad · 5–10 🟠 Weak · 10–15 🟡 OK · 15–20 🟢 Good · 20+ 💚 Excellent")
     inb = df[df["Channel"]=="Inbound"][["Agent","Owner","Health Qualify %","Health"]].sort_values("Health Qualify %", ascending=False).rename(columns={"Health Qualify %": "Qualify %"})
+    inb.insert(0, "", inb["Health"].map(HEALTH_EMOJI))
     paged_table(inb, key="health_inbound")
 
     st.markdown('<p class="section-title">Bot Health — Outbound</p>', unsafe_allow_html=True)
-    st.caption("Zone thresholds: 0–0.2 Bad · 0.2–0.4 Weak · 0.4–0.6 OK · 0.6–0.8 Good · 0.8–1.0 Very Good · 1.0+ Excellent")
+    st.caption("Zone thresholds: 0–0.2 🔴 Bad · 0.2–0.4 🟠 Weak · 0.4–0.6 🟡 OK · 0.6–0.8 🟢 Good · 0.8–1.0 🟢 Very Good · 1.0+ 💚 Excellent")
     out = df[df["Channel"]=="Outbound"][["Agent","Owner","Health Qualify %","Health"]].sort_values("Health Qualify %", ascending=False).rename(columns={"Health Qualify %": "Qualify %"})
+    out.insert(0, "", out["Health"].map(HEALTH_EMOJI))
     paged_table(out, key="health_outbound")
 
     with st.expander("Health zone thresholds"):
