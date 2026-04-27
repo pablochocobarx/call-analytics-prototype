@@ -178,8 +178,6 @@ with st.sidebar:
         if sel_owner != "All": df = df[df["Owner"] == sel_owner]
         if sel_am    != "All": df = df[df["AM"]    == sel_am]
 
-    st.divider()
-    st.button("🔄 Refresh data", use_container_width=True)
 
 
 # ─── ANUNAY ───────────────────────────────────────────────────────────────────
@@ -190,29 +188,20 @@ if persona.startswith("🤖"):
     ud=int(df["Dialled"].sum()); uc=int(df["Connected"].sum()); ui=int(df["Interacted"].sum())
     ucp=int(df["Completed"].sum()); uq=int(df["Qualified"].sum())
 
-    # Hero — funnel rates
+    # KPIs — 4 funnel rates (volume in table below, not duplicated here)
     c1,c2,c3,c4 = st.columns(4)
     c1.metric("Connect %",  f"{pct(uc,ud)}%")
     c2.metric("Interact %", f"{pct(ui,uc)}%")
     c3.metric("Complete %", f"{pct(ucp,ui)}%")
     c4.metric("Qualify %",  f"{pct(uq,ucp)}%")
 
-    # Secondary — volumes
-    st.markdown("<div class='small-caption'>Volume</div>", unsafe_allow_html=True)
-    c1,c2,c3,c4,c5 = st.columns(5)
-    c1.metric("Dialled", f"{ud:,}"); c2.metric("Connected", f"{uc:,}")
-    c3.metric("Interacted", f"{ui:,}"); c4.metric("Completed", f"{ucp:,}"); c5.metric("Qualified", f"{uq:,}")
-
-    st.divider()
-
     # Funnel chart
-    st.markdown("#### Funnel")
     funnel = pd.DataFrame({"Stage":["Dialled","Connected","Interacted","Completed","Qualified"],"Leads":[ud,uc,ui,ucp,uq]})
     st.altair_chart(alt.Chart(funnel).mark_bar(cornerRadius=3).encode(
         y=alt.Y("Stage:N", sort=None, title=None),
         x=alt.X("Leads:Q", title=None),
         color=alt.Color("Stage:N", legend=None, scale=alt.Scale(scheme="blues", reverse=True)),
-        tooltip=["Stage","Leads"]).properties(height=200), use_container_width=True)
+        tooltip=["Stage","Leads"]).properties(height=180), use_container_width=True)
 
     st.divider()
 
@@ -228,12 +217,7 @@ if persona.startswith("🤖"):
     sel_bot = st.selectbox("Pick a bot", ["—"] + df["Agent"].tolist(), label_visibility="collapsed")
     if sel_bot != "—":
         bot = df[df["Agent"]==sel_bot].iloc[0]
-        c1,c2,c3,c4,c5 = st.columns(5)
-        c1.markdown(f"**Stack**\n\n{bot['Stack']}")
-        c2.markdown(f"**Channel**\n\n{bot['Channel']}")
-        c3.markdown(f"**Subtype**\n\n{bot['Subtype']}")
-        c4.markdown(f"**Owner**\n\n{bot['Owner']}")
-        c5.markdown(f"**Status**\n\n{bot['Bot Status']}")
+        st.caption(f"Stack: **{bot['Stack']}**  •  Channel: **{bot['Channel']}**  •  Subtype: **{bot['Subtype']}**  •  Owner: **{bot['Owner']}**  •  Status: **{bot['Bot Status']}**")
 
         np.random.seed(hash(sel_bot)%1000)
         days = pd.date_range(end=date.today(), periods=14)
