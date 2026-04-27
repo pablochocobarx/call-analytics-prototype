@@ -286,14 +286,15 @@ else:
     }).reset_index().sort_values("Revenue (₹)",ascending=False)
     st.dataframe(summary, use_container_width=True, hide_index=True)
 
-    st.markdown('<p class="section-title">Bot Health Zones</p>', unsafe_allow_html=True)
-    st.caption("Inbound: 0–20%+ scale  |  Outbound: 0–1%+ scale")
-    chart = alt.Chart(df).mark_bar().encode(
-        y=alt.Y("Agent:N",sort="-x",title=None), x=alt.X("Health Qualify %:Q", title="Qualified % of Dialled"),
-        color=alt.Color("Health:N", scale=alt.Scale(domain=["Bad","Weak","OK","Good","Very Good","Excellent"],
-            range=["#d9534f","#f0ad4e","#ffc107","#5cb85c","#28a745","#1e7e34"])),
-        tooltip=["Agent","Channel","Health Qualify %","Health"]).properties(height=max(300,24*len(df)))
-    st.altair_chart(chart, use_container_width=True)
+    st.markdown('<p class="section-title">Bot Health — Inbound</p>', unsafe_allow_html=True)
+    st.caption("Zone thresholds: 0–5 Bad · 5–10 Weak · 10–15 OK · 15–20 Good · 20+ Excellent")
+    inb = df[df["Channel"]=="Inbound"][["Agent","Owner","Health Qualify %","Health"]].sort_values("Health Qualify %", ascending=False).rename(columns={"Health Qualify %": "Qualify %"})
+    st.dataframe(inb, use_container_width=True, hide_index=True)
+
+    st.markdown('<p class="section-title">Bot Health — Outbound</p>', unsafe_allow_html=True)
+    st.caption("Zone thresholds: 0–0.2 Bad · 0.2–0.4 Weak · 0.4–0.6 OK · 0.6–0.8 Good · 0.8–1.0 Very Good · 1.0+ Excellent")
+    out = df[df["Channel"]=="Outbound"][["Agent","Owner","Health Qualify %","Health"]].sort_values("Health Qualify %", ascending=False).rename(columns={"Health Qualify %": "Qualify %"})
+    st.dataframe(out, use_container_width=True, hide_index=True)
 
     with st.expander("Health zone thresholds"):
         st.markdown("""
