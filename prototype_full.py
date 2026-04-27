@@ -102,6 +102,20 @@ def health_zone(qp, ch):
 agents_df["Health"] = agents_df.apply(lambda r: health_zone(r["Health Qualify %"], r["Channel"]), axis=1)
 
 
+def paged_table(df_in: pd.DataFrame, key: str, page_size_default: int = 10):
+    """Render a dataframe with page selector + page-size selector."""
+    if df_in.empty:
+        st.info("No rows.")
+        return
+    c1, c2, c3 = st.columns([1, 1, 4])
+    page_size = c1.selectbox("Rows per page", [10, 25, 50, 100], index=[10,25,50,100].index(page_size_default), key=f"{key}_ps")
+    total = len(df_in)
+    n_pages = max(1, (total + page_size - 1) // page_size)
+    page = c2.number_input(f"Page (1–{n_pages})", min_value=1, max_value=n_pages, value=1, step=1, key=f"{key}_pg")
+    c3.caption(f"Showing {min((page-1)*page_size+1, total)}–{min(page*page_size, total)} of {total}")
+    st.dataframe(df_in.iloc[(page-1)*page_size : page*page_size], use_container_width=True, hide_index=True)
+
+
 # ─── PERSONA SWITCHER ─────────────────────────────────────────────────────────
 
 st.markdown("## 📞 Call Analytics Dashboard")
@@ -185,7 +199,7 @@ if persona.startswith("🤖"):
 
     st.markdown('<p class="section-title">Per-Bot Breakdown</p>', unsafe_allow_html=True)
     cols = ["Agent","Owner","Client","Stack","Channel","Subtype","Bot Status","Dialled","Connected","Interacted","Completed","Qualified","Connect %","Interact %","Complete %","Qualify %"]
-    st.dataframe(df[cols], use_container_width=True, hide_index=True)
+    paged_table(df[cols], key="anunay_table")
 
     st.markdown('<p class="section-title">Drill-down</p>', unsafe_allow_html=True)
     sel_bot = st.selectbox("Pick a bot", ["—"] + df["Agent"].tolist())
@@ -261,7 +275,7 @@ elif persona.startswith("💼"):
 
     st.markdown('<p class="section-title">Per-Bot Lead Status & Revenue</p>', unsafe_allow_html=True)
     cols = ["Agent","AM","Client","Channel","Qualified","IQL","DQL","Followup","Customer Followup","SQL","SQL/QL %","Revenue (₹)","Cost (₹)","Profit (₹)","Avg Talk (s)"]
-    st.dataframe(df[cols].sort_values("Revenue (₹)",ascending=False), use_container_width=True, hide_index=True)
+    paged_table(df[cols].sort_values("Revenue (₹)",ascending=False), key="jitesh_table")
 
 
 # ─── FOUNDERS VIEW ────────────────────────────────────────────────────────────
@@ -284,17 +298,17 @@ else:
         "Requests":("Requests","sum"), "Revisions":("Revisions","sum"),
         "Qualified":("Qualified","sum"), "Revenue (₹)":("Revenue (₹)","sum")
     }).reset_index().sort_values("Revenue (₹)",ascending=False)
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+    paged_table(summary, key="owner_summary")
 
     st.markdown('<p class="section-title">Bot Health — Inbound</p>', unsafe_allow_html=True)
     st.caption("Zone thresholds: 0–5 Bad · 5–10 Weak · 10–15 OK · 15–20 Good · 20+ Excellent")
     inb = df[df["Channel"]=="Inbound"][["Agent","Owner","Health Qualify %","Health"]].sort_values("Health Qualify %", ascending=False).rename(columns={"Health Qualify %": "Qualify %"})
-    st.dataframe(inb, use_container_width=True, hide_index=True)
+    paged_table(inb, key="health_inbound")
 
     st.markdown('<p class="section-title">Bot Health — Outbound</p>', unsafe_allow_html=True)
     st.caption("Zone thresholds: 0–0.2 Bad · 0.2–0.4 Weak · 0.4–0.6 OK · 0.6–0.8 Good · 0.8–1.0 Very Good · 1.0+ Excellent")
     out = df[df["Channel"]=="Outbound"][["Agent","Owner","Health Qualify %","Health"]].sort_values("Health Qualify %", ascending=False).rename(columns={"Health Qualify %": "Qualify %"})
-    st.dataframe(out, use_container_width=True, hide_index=True)
+    paged_table(out, key="health_outbound")
 
     with st.expander("Health zone thresholds"):
         st.markdown("""
