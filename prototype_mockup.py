@@ -168,15 +168,19 @@ with st.sidebar:
 
     elif persona.startswith("💼"):
         sel_am      = st.selectbox("Account Manager", ["All"] + AMs)
+        sel_stack   = st.selectbox("Bot Stack", ["All"] + STACKS, help="LGS = Lead Gen / LQS = Lead Qualification")
         sel_channel = st.selectbox("Channel", ["All"] + CHANNELS)
         if sel_am      != "All": df = df[df["AM"]      == sel_am]
+        if sel_stack   != "All": df = df[df["Stack"]   == sel_stack]
         if sel_channel != "All": df = df[df["Channel"] == sel_channel]
 
     else:
         sel_owner   = st.selectbox("Bot Owner", ["All"] + OWNERS)
         sel_am      = st.selectbox("Account Manager", ["All"] + AMs)
+        sel_stack   = st.selectbox("Bot Stack", ["All"] + STACKS, help="LGS = Lead Gen / LQS = Lead Qualification")
         if sel_owner != "All": df = df[df["Owner"] == sel_owner]
         if sel_am    != "All": df = df[df["AM"]    == sel_am]
+        if sel_stack != "All": df = df[df["Stack"] == sel_stack]
 
 
 
@@ -209,6 +213,22 @@ if persona.startswith("🤖"):
     st.markdown("#### Per-bot breakdown")
     cols = ["Agent","Owner","Client","Stack","Channel","Subtype","Bot Status","Connect %","Interact %","Complete %","Qualify %","Dialled","Qualified"]
     paged_table(df[cols].sort_values("Qualify %", ascending=False), key="anunay_table")
+
+    st.divider()
+
+    # Talk time
+    st.markdown("#### Talk time")
+    c1,c2 = st.columns(2)
+    c1.metric("Avg",    f"{int(df['Avg Talk (s)'].mean())} s")
+    c2.metric("Median", f"{int(df['Median Talk (s)'].median())} s")
+    total_calls_a = int(df["Dialled"].sum())
+    buckets_a = pd.DataFrame({"Bucket":["0-10s","10-20s","20-30s","30-40s","40s+"],
+        "Calls":[int(total_calls_a*p) for p in [0.18,0.14,0.12,0.10,0.46]]})
+    st.altair_chart(alt.Chart(buckets_a).mark_bar(cornerRadius=3).encode(
+        x=alt.X("Bucket:N", sort=None, title=None),
+        y=alt.Y("Calls:Q", title=None),
+        color=alt.Color("Bucket:N", legend=None, scale=alt.Scale(scheme="purples")),
+        tooltip=["Bucket","Calls"]).properties(height=200), use_container_width=True)
 
     st.divider()
 
