@@ -7,7 +7,7 @@ import pandas as pd
 import altair as alt
 from datetime import date, datetime, timedelta
 
-from _queries import get_db, load_call_metrics, load_sql_counts, load_daily_trend
+from _queries import get_db, load_call_metrics, load_sql_counts, load_daily_trend, load_sequence_meta
 from _pricing import get_client_am
 
 st.set_page_config(page_title="Call Analytics", page_icon="📞", layout="wide")
@@ -75,27 +75,13 @@ def paged_table(df_in: pd.DataFrame, key: str, default: int = 10):
 def build_agents_df(date_from_str: str, date_to_str: str) -> pd.DataFrame:
     db = get_db()
 
-    # Load all agents with ObjectId for channel lookup
+    # Load all agents
     agents = list(db.ai_agents.find({}, {
         "agent_identifier": 1, "owner": 1, "template": 1, "status": 1
     }))
 
-    # campaign.ai_agent (ObjectId str) → inbound/outbound
-    channel_map: dict[str, str] = {}
-    for c in db.campaign.find({}, {"ai_agent": 1, "type": 1}):
-        aid = str(c.get("ai_agent", ""))
-        ch = c.get("type", "")
-        if aid and ch:
-            channel_map[aid] = ch
-
-    # agent ObjectId str → agent_identifier
-    id_to_ident: dict[str, str] = {str(a["_id"]): a.get("agent_identifier", "") for a in agents}
-    # agent_identifier → inbound/outbound
-    ident_channel: dict[str, str] = {
-        ident: channel_map[id_str]
-        for id_str, ident in id_to_ident.items()
-        if id_str in channel_map and ident
-    }
+    # agent_identifier → {channel, status} from sequences
+    seq_meta: dict[str, dict] = load_sequence_meta()
 
     call_metrics = load_call_metrics(date_from_str, date_to_str)
     sql_counts = load_sql_counts(date_from_str, date_to_str)
@@ -109,11 +95,9 @@ def build_agents_df(date_from_str: str, date_to_str: str) -> pd.DataFrame:
         if not m:
             continue
 
-        template = (a.get("template") or "").lower()
-        stack = "LQS" if "qualifying" in template else ("LGS" if template else "—")
-
-        ch_raw = ident_channel.get(ident, "")
-        channel = "Inbound" if ch_raw == "inbound" else ("Outbound" if ch_raw == "outbound" else "—")
+        meta    = seq_meta.get(ident, {})
+        channel = meta.get("channel", "—")
+        bot_status = meta.get("status", "Paused")
 
         client, am, ql_rate = get_client_am(ident)
         qualified = m.get("qualified", 0)
@@ -125,10 +109,10 @@ def build_agents_df(date_from_str: str, date_to_str: str) -> pd.DataFrame:
             "Owner":             a.get("owner") or "—",
             "Client":            client,
             "AM":                am,
-            "Stack":             stack,
+            "Stack":             "—",
             "Channel":           channel,
             "Subtype":           "—",
-            "Bot Status":        "Running" if a.get("status") == "Published" else "Paused",
+            "Bot Status":        bot_status,
             "Dialled":           m.get("dialled", 0),
             "Connected":         m.get("connected", 0),
             "Interacted":        m.get("interacted", 0),
@@ -143,7 +127,7 @@ def build_agents_df(date_from_str: str, date_to_str: str) -> pd.DataFrame:
             "Revenue (₹)":       revenue,
             "Profit (₹)":        revenue - cost,
             "Avg Talk (s)":      round(m.get("avg_duration") or 0),
-            "Median Talk (s)":   round(m.get("avg_duration") or 0),
+            "Median Talk (s)":   round(m.get("median_duration") or 0),
             "Revisions":         "—",
             "Requests":          "—",
         })
@@ -240,41 +224,36 @@ if raw_df.empty:
 CLIENTS  = sorted(raw_df["Client"].unique().tolist())
 OWNERS   = sorted([o for o in raw_df["Owner"].unique().tolist() if o != "—"])
 AMs      = sorted([a for a in raw_df["AM"].unique().tolist() if a != "—"])
-STACKS   = sorted([s for s in raw_df["Stack"].unique().tolist() if s != "—"])
 CHANNELS = sorted([c for c in raw_df["Channel"].unique().tolist() if c != "—"])
 
 with st.sidebar:
-    sel_client = st.selectbox("Client", ["All"] + CLIENTS)
+    sel_client     = st.selectbox("Client", ["All"] + CLIENTS)
+    show_paused    = st.checkbox("Include paused bots", value=False)
 
     df = raw_df.copy()
+    # Default: running bots only
+    if not show_paused:
+        df = df[df["Bot Status"] == "Running"]
     if sel_client != "All":
         df = df[df["Client"] == sel_client]
 
     if persona.startswith("🤖"):
         sel_owner   = st.selectbox("Bot Owner", ["All"] + OWNERS)
-        sel_stack   = st.selectbox("Bot Stack", ["All"] + STACKS, help="LGS = Lead Gen / LQS = Lead Qualification")
         sel_channel = st.selectbox("Channel", ["All"] + CHANNELS)
-        sel_status  = st.selectbox("Bot Status", ["All", "Running", "Paused"])
-        if sel_owner   != "All": df = df[df["Owner"]      == sel_owner]
-        if sel_stack   != "All": df = df[df["Stack"]      == sel_stack]
-        if sel_channel != "All": df = df[df["Channel"]    == sel_channel]
-        if sel_status  != "All": df = df[df["Bot Status"] == sel_status]
+        if sel_owner   != "All": df = df[df["Owner"]   == sel_owner]
+        if sel_channel != "All": df = df[df["Channel"] == sel_channel]
 
     elif persona.startswith("💼"):
         sel_am      = st.selectbox("Account Manager", ["All"] + AMs)
-        sel_stack   = st.selectbox("Bot Stack", ["All"] + STACKS, help="LGS = Lead Gen / LQS = Lead Qualification")
         sel_channel = st.selectbox("Channel", ["All"] + CHANNELS)
         if sel_am      != "All": df = df[df["AM"]      == sel_am]
-        if sel_stack   != "All": df = df[df["Stack"]   == sel_stack]
         if sel_channel != "All": df = df[df["Channel"] == sel_channel]
 
     else:
         sel_owner = st.selectbox("Bot Owner", ["All"] + OWNERS)
         sel_am    = st.selectbox("Account Manager", ["All"] + AMs)
-        sel_stack = st.selectbox("Bot Stack", ["All"] + STACKS, help="LGS = Lead Gen / LQS = Lead Qualification")
         if sel_owner != "All": df = df[df["Owner"] == sel_owner]
         if sel_am    != "All": df = df[df["AM"]    == sel_am]
-        if sel_stack != "All": df = df[df["Stack"] == sel_stack]
 
 # Derived columns
 def safe_div(n, d): return round(n / d * 100, 1) if d else 0.0
@@ -323,17 +302,18 @@ if persona.startswith("🤖"):
     st.divider()
 
     st.markdown("#### Per-bot breakdown")
-    cols = ["Agent", "Owner", "Client", "Stack", "Channel", "Subtype", "Bot Status",
+    cols = ["Agent", "Owner", "Client", "Channel", "Bot Status",
             "Connect %", "Interact %", "Complete %", "Qualify %", "Dialled", "Qualified"]
     paged_table(df[cols].sort_values("Qualify %", ascending=False), key="anunay_table")
 
     st.divider()
 
     st.markdown("#### Talk time")
-    avg_talk = int(df["Avg Talk (s)"].mean()) if not df.empty else 0
+    avg_talk    = int(df["Avg Talk (s)"].mean())    if not df.empty else 0
+    median_talk = int(df["Median Talk (s)"].median()) if not df.empty else 0
     c1, c2 = st.columns(2)
-    c1.metric("Avg", f"{avg_talk} s")
-    c2.metric("Median", f"{avg_talk} s")
+    c1.metric("Avg",    f"{avg_talk} s")
+    c2.metric("Median", f"{median_talk} s")
 
     buckets_df = load_talk_buckets(None, date_from_str, date_to_str)
     if sel_client != "All" and not df.empty:
@@ -364,8 +344,8 @@ if persona.startswith("🤖"):
     if sel_bot != "—":
         bot = df[df["Agent"] == sel_bot].iloc[0]
         st.caption(
-            f"Stack: **{bot['Stack']}**  •  Channel: **{bot['Channel']}**  •  "
-            f"Subtype: **{bot['Subtype']}**  •  Owner: **{bot['Owner']}**  •  Status: **{bot['Bot Status']}**"
+            f"Channel: **{bot['Channel']}**  •  "
+            f"Owner: **{bot['Owner']}**  •  Status: **{bot['Bot Status']}**"
         )
 
         with st.spinner("Loading trend…"):
@@ -392,6 +372,24 @@ if persona.startswith("🤖"):
             )
         else:
             st.info("No daily data for this agent in selected period.")
+
+        st.markdown("**Talk time distribution**")
+        bot_buckets = load_talk_buckets(sel_bot, date_from_str, date_to_str)
+        if not bot_buckets.empty:
+            c1, c2 = st.columns(2)
+            c1.metric("Avg Talk",    f"{int(bot['Avg Talk (s)'])} s")
+            c2.metric("Median Talk", f"{int(bot['Median Talk (s)'])} s")
+            st.altair_chart(
+                alt.Chart(bot_buckets).mark_bar(cornerRadius=3).encode(
+                    x=alt.X("Bucket:N", sort=None, title=None),
+                    y=alt.Y("Calls:Q", title=None),
+                    color=alt.Color("Bucket:N", legend=None, scale=alt.Scale(scheme="blues")),
+                    tooltip=["Bucket", "Calls"]
+                ).properties(height=200),
+                use_container_width=True
+            )
+        else:
+            st.info("No talk time data for this bot.")
 
 
 # ─── JITESH ───────────────────────────────────────────────────────────────────
@@ -452,10 +450,11 @@ elif persona.startswith("💼"):
     st.divider()
 
     st.markdown("#### Talk time")
-    avg_talk = int(df["Avg Talk (s)"].mean()) if not df.empty else 0
+    avg_talk    = int(df["Avg Talk (s)"].mean())    if not df.empty else 0
+    median_talk = int(df["Median Talk (s)"].median()) if not df.empty else 0
     c1, c2 = st.columns(2)
     c1.metric("Avg",    f"{avg_talk} s")
-    c2.metric("Median", f"{avg_talk} s")
+    c2.metric("Median", f"{median_talk} s")
     buckets_df = load_talk_buckets(None, date_from_str, date_to_str)
     st.altair_chart(
         alt.Chart(buckets_df).mark_bar(cornerRadius=3).encode(
@@ -476,6 +475,27 @@ elif persona.startswith("💼"):
     df_disp["Profit"]  = df_disp["Profit (₹)"].map(fmt_inr)
     cols = ["Agent","AM","Client","Channel","Qualified","IQL","DQL","SQL","SQL/QL %","Revenue","Cost","Profit","Avg Talk (s)"]
     paged_table(df_disp[cols].sort_values("Qualified", ascending=False), key="jitesh_table")
+
+    st.divider()
+    st.markdown("#### Bot drill-down — talk time")
+    bot_list_j = df["Agent"].tolist()
+    sel_bot_j = st.selectbox("Pick a bot", ["—"] + bot_list_j, label_visibility="collapsed", key="jitesh_bot_sel")
+    if sel_bot_j != "—":
+        bot_j = df[df["Agent"] == sel_bot_j].iloc[0]
+        st.caption(f"Channel: **{bot_j['Channel']}**  •  Avg: **{int(bot_j['Avg Talk (s)'])} s**  •  Median: **{int(bot_j['Median Talk (s)'])} s**")
+        bot_buckets_j = load_talk_buckets(sel_bot_j, date_from_str, date_to_str)
+        if not bot_buckets_j.empty:
+            st.altair_chart(
+                alt.Chart(bot_buckets_j).mark_bar(cornerRadius=3).encode(
+                    x=alt.X("Bucket:N", sort=None, title=None),
+                    y=alt.Y("Calls:Q", title=None),
+                    color=alt.Color("Bucket:N", legend=None, scale=alt.Scale(scheme="purples")),
+                    tooltip=["Bucket", "Calls"]
+                ).properties(height=220),
+                use_container_width=True
+            )
+        else:
+            st.info("No talk time data for this bot.")
 
 
 # ─── FOUNDERS ─────────────────────────────────────────────────────────────────
@@ -567,3 +587,5 @@ else:
         tdf = tdf.copy()
         tdf["Health"] = tdf["Health"].map(lambda h: f"{HEALTH_EMOJI.get(h,'')} {h}")
         paged_table(tdf, key=key)
+
+

@@ -40,24 +40,55 @@ def load_agent_meta():
 
 
 @st.cache_data(ttl=300)
-def load_campaign_channel_map():
-    """Fetch campaign to channel mapping.
+def load_sequence_meta():
+    """Fetch channel and status per agent_identifier from sequences (ai_call campaigns).
+
+    A bot is Running if ANY of its sequences is running.
+    A bot is Paused if ALL of its sequences are paused/completed.
 
     Returns:
-        dict: {agent_id_as_str → "inbound"/"outbound"}
+        dict: {agent_identifier → {"channel": "Inbound"/"Outbound", "status": "Running"/"Paused"}}
     """
     db = get_db()
-    campaigns = db["campaign"]
+
+    # {agent_identifier → set of sequence statuses}
+    ident_statuses: dict[str, set] = {}
+    ident_channel: dict[str, str] = {}
+
+    for doc in db["campaign"].find(
+        {"channel": "ai_call"},
+        {"channel_configuration.agent_identifier": 1, "type": 1, "status": 1}
+    ):
+        ident = (doc.get("channel_configuration") or {}).get("agent_identifier", "")
+        ctype = doc.get("type", "")
+        seq_status = doc.get("status", "")
+        if not ident:
+            continue
+
+        # Channel — inbound wins if any sequence is inbound
+        if ctype in ("inbound", "performance"):
+            ident_channel[ident] = "Inbound"
+        elif ctype == "outbound" and ident not in ident_channel:
+            ident_channel[ident] = "Outbound"
+
+        # Collect all sequence statuses for this bot
+        ident_statuses.setdefault(ident, set()).add(seq_status)
 
     result = {}
-    for doc in campaigns.find({}, {"ai_agent": 1, "type": 1}):
-        ai_agent = doc.get("ai_agent")
-        if ai_agent:
-            agent_id = str(ai_agent)
-            channel = doc.get("type", "unknown")
-            result[agent_id] = channel
+    for ident, statuses in ident_statuses.items():
+        # Running if any sequence is running
+        bot_status = "Running" if "running" in statuses else "Paused"
+        result[ident] = {
+            "channel": ident_channel.get(ident, "—"),
+            "status": bot_status
+        }
 
     return result
+
+
+def load_campaign_channel_map():
+    """Compatibility wrapper — returns channel map only."""
+    return {ident: meta["channel"] for ident, meta in load_sequence_meta().items()}
 
 
 @st.cache_data(ttl=300)
@@ -148,10 +179,19 @@ def load_call_metrics(date_from_str: str, date_to_str: str):
                     "$sum": {"$cond": [{"$eq": ["$lead_status", "Customer Follow up"]}, 1, 0]}
                 },
                 "total_cost": {"$sum": "$total_cost"},
-                "avg_duration": {"$avg": "$max_duration"}
+                "avg_duration": {"$avg": "$max_duration"},
+                "durations": {"$push": "$max_duration"}
             }
         }
     ]
+
+    def _median(durations: list) -> float:
+        vals = sorted(d for d in durations if d is not None)
+        n = len(vals)
+        if n == 0:
+            return 0.0
+        mid = n // 2
+        return vals[mid] if n % 2 == 1 else (vals[mid - 1] + vals[mid]) / 2
 
     result = {}
     for doc in call_log.aggregate(pipeline, allowDiskUse=True):
@@ -168,7 +208,8 @@ def load_call_metrics(date_from_str: str, date_to_str: str):
                 "followup": doc.get("followup", 0),
                 "cfu": doc.get("cfu", 0),
                 "total_cost": doc.get("total_cost", 0),
-                "avg_duration": doc.get("avg_duration", 0)
+                "avg_duration": doc.get("avg_duration", 0),
+                "median_duration": _median(doc.get("durations", []))
             }
 
     return result
@@ -178,6 +219,9 @@ def load_call_metrics(date_from_str: str, date_to_str: str):
 def load_sql_counts(date_from_str: str, date_to_str: str):
     """Load SQL lead counts per agent.
 
+    Join: campaign_lead.lead_id (sql=True) → call_log.lead_id → agent_identifier.
+    campaign_lead.agent_identifier is NULL for 97% of SQL docs — can't use directly.
+
     Args:
         date_from_str: "YYYY-MM-DD" or "all"
         date_to_str: "YYYY-MM-DD"
@@ -186,10 +230,52 @@ def load_sql_counts(date_from_str: str, date_to_str: str):
         dict: {agent_identifier → sql_count}
     """
     db = get_db()
+
+    # Step 1: get all SQL lead_ids (date filter on sql_marked_at)
+    match_stage = {"sql": True, "lead_id": {"$ne": None}}
+    if date_from_str != "all":
+        date_from = datetime.strptime(date_from_str, "%Y-%m-%d")
+        date_to = datetime.strptime(date_to_str, "%Y-%m-%d")
+        date_to = date_to.replace(hour=23, minute=59, second=59)
+        match_stage["sql_marked_at"] = {"$gte": date_from, "$lte": date_to}
+
+    sql_lead_ids = [
+        doc["lead_id"]
+        for doc in db["campaign_lead"].find(match_stage, {"lead_id": 1})
+    ]
+
+    if not sql_lead_ids:
+        return {}
+
+    # Step 2: look up agent_identifier for those lead_ids in call_log
+    pipeline = [
+        {"$match": {"lead_id": {"$in": sql_lead_ids}}},
+        {"$group": {
+            "_id": {"agent": "$agent_identifier", "lead": "$lead_id"}
+        }},
+        {"$group": {
+            "_id": "$_id.agent",
+            "sql_count": {"$sum": 1}
+        }}
+    ]
+
+    result = {}
+    for doc in db["call_log"].aggregate(pipeline, allowDiskUse=True):
+        agent_id = str(doc.get("_id", ""))
+        if agent_id:
+            result[agent_id] = doc.get("sql_count", 0)
+
+    return result
+
+
+def _load_sql_counts_old(date_from_str: str, date_to_str: str):
+    """OLD broken implementation kept for reference.
+    Bug: joined campaign_lead._id (ObjectId) against call_log.lead_id (UUID string) → always 0.
+    """
+    db = get_db()
     campaign_lead = db["campaign_lead"]
     call_log = db["call_log"]
 
-    # Fetch all SQL lead IDs in batches
     sql_lead_ids = []
     batch_size = 10000
     skip = 0
@@ -209,7 +295,6 @@ def load_sql_counts(date_from_str: str, date_to_str: str):
     if not sql_lead_ids:
         return {}
 
-    # Build date filter for call_log
     match_stage = {"lead_id": {"$in": sql_lead_ids}}
     if date_from_str != "all":
         date_from = datetime.strptime(date_from_str, "%Y-%m-%d")

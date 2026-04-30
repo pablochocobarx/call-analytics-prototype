@@ -346,6 +346,16 @@ def get_client_am(agent_identifier: str) -> tuple[str, str, float]:
 
 
 def compute_revenue(agent_identifier: str, qualified_count: int) -> int:
-    """Returns estimated revenue in INR."""
+    """Returns estimated revenue in INR.
+
+    TODO(revenue-model): Budget-model clients are WRONG here.
+    Budget = fixed contract value, NOT per-QL billing.
+    Current logic: revenue = qualified × ql_rate (understates real contract value).
+    Fix needed: add `contract_value` per budget project in PROJECTS_DATA,
+    then return contract_value directly instead of qualified × rate.
+    Affected: Assetz (Meru, Micropolis), Bhavisha Homes, DSR, Lanco Hills,
+    Phoenix Kessaku, Sattva (Springs, Vasanta Cove), TVS (Luxor, Serene Springs),
+    Universal Education. Keeping current logic until contract values confirmed.
+    """
     _, _, ql_rate = get_client_am(agent_identifier)
     return int(ql_rate * qualified_count)
